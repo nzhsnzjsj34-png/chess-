@@ -20,6 +20,11 @@ import {
 import { AnalysisPanel } from './components/AnalysisPanel';
 import { ChessBoard } from './components/ChessBoard';
 import { CoachChat } from './components/CoachChat';
+import { CourseInstructionPanel } from './components/CourseInstructionPanel';
+import { CourseLessonBoardPanel } from './components/CourseLessonBoardPanel';
+import { CourseOverviewPanel } from './components/CourseOverviewPanel';
+import { CourseRoadmap } from './components/CourseRoadmap';
+import { CourseWelcome } from './components/CourseWelcome';
 import { EvalBar } from './components/EvalBar';
 import { GameOverModal } from './components/GameOverModal';
 import { LessonControls, LessonPanel, LessonSidebar } from './components/LessonHub';
@@ -38,10 +43,17 @@ import {
   SectionHeading,
   cx,
 } from './components/ui';
+import {
+  COURSE_LESSONS,
+  COURSE_PREVIEW_STEP,
+  getCourseLesson,
+  getCourseStep,
+} from './data/course';
 import { BOARD_THEMES, getDifficultyPreset } from './data/settings';
 import { openingBookSize, type DeviationDrill } from './data/openingBook';
 import { engineService } from './engine/uciEngine';
 import { useCoachChat } from './hooks/useCoachChat';
+import { useCourseProgress } from './hooks/useCourseProgress';
 import { useEngineStatus } from './hooks/useEngineStatus';
 import { useLessonPlayer } from './hooks/useLessonPlayer';
 import {
@@ -251,8 +263,14 @@ export default function App() {
   const engineStatus = useEngineStatus();
   const lesson = useLessonPlayer();
   const chat = useCoachChat();
+  const courseProgress = useCourseProgress();
 
-  const [activeTab, setActiveTab] = useState<TabId>('play');
+  const [activeTab, setActiveTab] = useState<TabId>('course');
+  const [courseView, setCourseView] = useState<'home' | 'lesson'>('home');
+  const [activeCourseLessonId, setActiveCourseLessonId] = useState<string | null>(null);
+  const [activeCourseStepIndex, setActiveCourseStepIndex] = useState(0);
+  const [courseWrongMessage, setCourseWrongMessage] = useState<string | null>(null);
+  const [courseHintVisible, setCourseHintVisible] = useState(false);
   const [reviewPly, setReviewPly] = useState<number | null>(null);
   const [reviewAnalysis, setReviewAnalysis] = useState<EngineSearchResult | null>(null);
   const [reviewAnalyzing, setReviewAnalyzing] = useState(false);
@@ -264,15 +282,45 @@ export default function App() {
     return game.sessionColor === 'w' ? 'white' : 'black';
   }, [settings.orientation, game.sessionColor]);
   const visibleOrientation = useMemo<'white' | 'black'>(() => {
-    // Lessons are authored from White's side; explicit orientation still wins.
-    if (activeTab === 'learn' && settings.orientation === 'auto') return 'white';
+    // Course and lessons are authored from White's side; explicit orientation still wins.
+    if (
+      (activeTab === 'learn' || activeTab === 'course') &&
+      settings.orientation === 'auto'
+    ) {
+      return 'white';
+    }
     return boardOrientation;
   }, [activeTab, boardOrientation, settings.orientation]);
 
+  const isCourse = activeTab === 'course';
   const isLesson = activeTab === 'learn';
-  const reviewMode = reviewPly !== null && !isLesson;
+  const activeCourseLesson = useMemo(
+    () => getCourseLesson(activeCourseLessonId),
+    [activeCourseLessonId],
+  );
+  const activeCourseStep = useMemo(
+    () =>
+      activeCourseLesson
+        ? getCourseStep(activeCourseLesson, activeCourseStepIndex)
+        : null,
+    [activeCourseLesson, activeCourseStepIndex],
+  );
+  const activeCourseStepComplete = activeCourseStep
+    ? courseProgress.isStepComplete(activeCourseStep.id)
+    : false;
+  const courseBoardFen = activeCourseStep
+    ? activeCourseStepComplete
+      ? activeCourseStep.afterFen
+      : activeCourseStep.beforeFen
+    : COURSE_PREVIEW_STEP.beforeFen;
+
+  const reviewMode = reviewPly !== null && !isLesson && !isCourse;
   const liveFen = reviewPly !== null ? game.fenHistory[reviewPly] ?? game.fen : game.fen;
-  const displayFen = isLesson ? lesson.frame.fen : liveFen;
+  const displayFen = isCourse
+    ? courseBoardFen
+    : isLesson
+      ? lesson.frame.fen
+      : liveFen;
   const displayedStatus = useMemo(() => getGameStateInfo(displayFen), [displayFen]);
   const viewedMove = reviewPly !== null ? game.moves[reviewPly - 1] : game.moves.at(-1);
 
@@ -325,10 +373,14 @@ export default function App() {
     settings.multiPv,
   ]);
 
-  const analysisForPanel = reviewMode ? reviewAnalysis : game.analysis;
-  const panelAnalyzing = reviewMode ? reviewAnalyzing : game.analyzing;
+  const analysisForPanel = isCourse
+    ? null
+    : reviewMode
+      ? reviewAnalysis
+      : game.analysis;
+  const panelAnalyzing = isCourse ? false : reviewMode ? reviewAnalyzing : game.analyzing;
   const evaluation = useMemo(() => {
-    if (isLesson) return { score: 0, mate: undefined as number | undefined };
+    if (isCourse || isLesson) return { score: 0, mate: undefined as number | undefined };
     if (analysisForPanel) {
       return {
         score: scoreForWhite(analysisForPanel),
@@ -340,7 +392,7 @@ export default function App() {
       if (game.status.winner === 'b') return { score: -1000, mate: -1 };
     }
     return { score: 0, mate: undefined as number | undefined };
-  }, [analysisForPanel, game.status, isLesson]);
+  }, [analysisForPanel, game.status, isCourse, isLesson]);
 
   const bookHintSquares = useMemo(
     () =>
@@ -365,31 +417,58 @@ export default function App() {
     return game.lastMove;
   }, [game.lastMove, isLesson, lessonLastMove, reviewMode, viewedMove]);
 
-  const displayFeedback: MoveFeedback | null = reviewMode
-    ? (viewedMove?.feedback ?? null)
-    : isLesson
-      ? null
-      : game.feedback;
+  const displayFeedback: MoveFeedback | null = isCourse
+    ? null
+    : reviewMode
+      ? (viewedMove?.feedback ?? null)
+      : isLesson
+        ? null
+        : game.feedback;
 
   const coachContext = useMemo<CoachContext>(() => {
     const lessonMove = lesson.frame.san;
     return {
       fen: displayFen,
-      pgn: isLesson ? '' : game.pgn,
-      lastMoveSan: isLesson ? (lessonMove ?? undefined) : viewedMove?.san,
-      lastMoveLan: isLesson ? lesson.chapter.subtitle : viewedMove?.lan,
-      evaluation: isLesson ? null : analysisForPanel,
+      pgn: isCourse || isLesson ? '' : game.pgn,
+      lastMoveSan: isCourse
+        ? activeCourseStep?.san
+        : isLesson
+          ? (lessonMove ?? undefined)
+          : viewedMove?.san,
+      lastMoveLan: isCourse
+        ? activeCourseStep?.expectedUci
+        : isLesson
+          ? lesson.chapter.subtitle
+          : viewedMove?.lan,
+      evaluation: isCourse || isLesson ? null : analysisForPanel,
       feedback: displayFeedback,
-      lessonTitle: isLesson ? lesson.chapter.title : undefined,
-      lessonStepTitle: isLesson ? lesson.frame.step.title : undefined,
-      openingHint: isLesson ? lesson.chapter.subtitle : game.openingStatus.label,
-      deviation: isLesson ? false : game.deviation,
-      playerColor: game.sessionColor,
+      lessonTitle: isCourse
+        ? activeCourseLesson?.title
+        : isLesson
+          ? lesson.chapter.title
+          : undefined,
+      lessonStepTitle: isCourse
+        ? activeCourseStep?.title
+        : isLesson
+          ? lesson.frame.step.title
+          : undefined,
+      openingHint: isCourse
+        ? activeCourseStep?.plan
+        : isLesson
+          ? lesson.chapter.subtitle
+          : game.openingStatus.label,
+      deviation: isCourse || isLesson ? false : game.deviation,
+      playerColor: isCourse ? 'w' : game.sessionColor,
       difficultyLabel: getDifficultyPreset(settings.difficulty).label,
-      openingMode: settings.openingMode,
+      openingMode: isCourse ? 'guided' : settings.openingMode,
       reviewMode,
     };
   }, [
+    activeCourseLesson?.title,
+    activeCourseStep?.expectedUci,
+    activeCourseStep?.plan,
+    activeCourseStep?.san,
+    activeCourseStep?.title,
     analysisForPanel,
     displayFen,
     displayFeedback,
@@ -397,6 +476,7 @@ export default function App() {
     game.openingStatus.label,
     game.pgn,
     game.sessionColor,
+    isCourse,
     isLesson,
     lesson.chapter.subtitle,
     lesson.chapter.title,
@@ -411,6 +491,153 @@ export default function App() {
   const clickSound = useCallback(() => {
     soundService.play('click', settings.soundEnabled, settings.soundVolume);
   }, [settings.soundEnabled, settings.soundVolume]);
+
+  const clearCourseFeedback = useCallback(() => setCourseWrongMessage(null), []);
+  const toggleCourseHint = useCallback(
+    () => setCourseHintVisible((current) => !current),
+    [],
+  );
+
+  const openCourseLesson = useCallback(
+    (lessonId: string, stepIndex = 0) => {
+      const target = getCourseLesson(lessonId);
+      if (!target) return;
+      const status = courseProgress.getLessonStatus(lessonId);
+      if (status === 'locked') {
+        game.showToast('Complete the previous lesson to unlock this one.', 'warning');
+        soundService.play('error', settings.soundEnabled, settings.soundVolume);
+        return;
+      }
+      const safeIndex = Math.max(0, Math.min(target.steps.length - 1, stepIndex));
+      setActiveCourseLessonId(lessonId);
+      setActiveCourseStepIndex(safeIndex);
+      setCourseWrongMessage(null);
+      setCourseHintVisible(false);
+      setCourseView('lesson');
+      setActiveTab('course');
+      courseProgress.startLesson(lessonId, safeIndex);
+      clickSound();
+    },
+    [
+      clickSound,
+      courseProgress,
+      game.showToast,
+      settings.soundEnabled,
+      settings.soundVolume,
+    ],
+  );
+
+  const handleStartCourse = useCallback(() => {
+    openCourseLesson(
+      courseProgress.continueTarget.lessonId,
+      courseProgress.continueTarget.stepIndex,
+    );
+  }, [courseProgress.continueTarget, openCourseLesson]);
+
+  const handleOpenCourseHome = useCallback(() => {
+    setCourseView('home');
+    setCourseWrongMessage(null);
+    setCourseHintVisible(false);
+    setActiveTab('course');
+    clickSound();
+  }, [clickSound]);
+
+  const handleOpenFreePlay = useCallback(() => {
+    setCourseView('home');
+    setActiveTab('play');
+    clickSound();
+  }, [clickSound]);
+
+  const handleCourseNext = useCallback(() => {
+    if (!activeCourseLesson) return;
+    const nextIndex = activeCourseStepIndex + 1;
+    if (nextIndex >= activeCourseLesson.steps.length) return;
+    setActiveCourseStepIndex(nextIndex);
+    setCourseWrongMessage(null);
+    setCourseHintVisible(false);
+    courseProgress.goToStep(activeCourseLesson.id, nextIndex);
+    clickSound();
+  }, [activeCourseLesson, activeCourseStepIndex, clickSound, courseProgress]);
+
+  const handleCoursePrevious = useCallback(() => {
+    if (!activeCourseLesson || activeCourseStepIndex === 0) return;
+    const previousIndex = activeCourseStepIndex - 1;
+    setActiveCourseStepIndex(previousIndex);
+    setCourseWrongMessage(null);
+    setCourseHintVisible(false);
+    clickSound();
+  }, [activeCourseLesson, activeCourseStepIndex, clickSound]);
+
+  const handleCourseStepComplete = useCallback(
+    (stepId: string) => {
+      if (!activeCourseLesson) return;
+      courseProgress.completeStep(
+        activeCourseLesson.id,
+        stepId,
+        activeCourseStepIndex + 1,
+      );
+      clearCourseFeedback();
+    },
+    [
+      activeCourseLesson,
+      activeCourseStepIndex,
+      clearCourseFeedback,
+      courseProgress,
+    ],
+  );
+
+  const handleFinishCourseLesson = useCallback(() => {
+    if (!activeCourseLesson) return;
+    const willCompleteCourse = COURSE_LESSONS.every(
+      (item) =>
+        item.id === activeCourseLesson.id ||
+        courseProgress.progress.completedLessonIds.includes(item.id),
+    );
+    courseProgress.completeLesson(activeCourseLesson.id);
+    game.showToast(
+      willCompleteCourse
+        ? 'Course complete! You can now review every lesson or play freely.'
+        : `Lesson ${activeCourseLesson.number} complete — the next lesson is unlocked.`,
+      'success',
+    );
+    soundService.play('gameEnd', settings.soundEnabled, settings.soundVolume);
+    setCourseView('home');
+    setActiveCourseLessonId(null);
+    setCourseWrongMessage(null);
+    setCourseHintVisible(false);
+  }, [
+    activeCourseLesson,
+    courseProgress,
+    game.showToast,
+    settings.soundEnabled,
+    settings.soundVolume,
+  ]);
+
+  const handleCourseFreePractice = useCallback(() => {
+    if (!activeCourseStep || !activeCourseLesson) return;
+    updateSettings({ playerColor: 'w', openingMode: 'guided' });
+    game.startFromFen(
+      activeCourseStep.beforeFen,
+      'w',
+      `${activeCourseLesson.title} · ${activeCourseStep.title}`,
+    );
+    setCourseView('home');
+    setActiveTab('play');
+    setReviewPly(null);
+    setCourseWrongMessage(null);
+    clickSound();
+  }, [activeCourseLesson, activeCourseStep, clickSound, game.startFromFen, updateSettings]);
+
+  const handleResetCourse = useCallback(() => {
+    courseProgress.resetCourse();
+    setCourseView('home');
+    setActiveCourseLessonId(null);
+    setActiveCourseStepIndex(0);
+    setCourseWrongMessage(null);
+    setCourseHintVisible(false);
+    game.showToast('Course progress reset. Start Lesson 1 whenever you are ready.', 'info');
+    clickSound();
+  }, [clickSound, courseProgress, game.showToast]);
 
   const handleNewGame = useCallback(
     (options?: StartPositionOptions) => {
@@ -503,6 +730,12 @@ export default function App() {
 
   const handleTabChange = useCallback(
     (tab: TabId) => {
+      if (tab === 'course') {
+        setCourseView('home');
+        setCourseWrongMessage(null);
+        setCourseHintVisible(false);
+        setReviewPly(null);
+      }
       if (tab === 'learn') setReviewPly(null);
       if (tab === 'play' && reviewPly !== null) setReviewPly(null);
       setActiveTab(tab);
@@ -593,6 +826,7 @@ export default function App() {
   );
 
   const banner = useMemo<BannerData | null>(() => {
+    if (isCourse) return null;
     if (isLesson) {
       return {
         icon: Lightbulb,
@@ -665,6 +899,7 @@ export default function App() {
     game.feedback,
     game.openingStatus.inBook,
     game.openingStatus.recommendedSan,
+    isCourse,
     isLesson,
     lesson.frame.step.tip,
     lesson.frame.step.title,
@@ -675,8 +910,10 @@ export default function App() {
     settings.punishDeviations,
   ]);
 
-  const showGameOver = game.status.over && dismissedResultFen !== game.fen;
-  const boardDisabled = isLesson || activeTab === 'settings' || reviewMode;
+  const showGameOver =
+    game.status.over && activeTab !== 'course' && dismissedResultFen !== game.fen;
+  const boardDisabled =
+    isCourse || isLesson || activeTab === 'settings' || reviewMode;
   const activeMoveIndex = reviewPly !== null ? reviewPly - 1 : game.moves.length - 1;
   const engineLabel = engineStatus.state === 'ready' ? 'Stockfish 19 Lite' : engineStatus.label;
 
@@ -693,6 +930,16 @@ export default function App() {
 
       <main className="mx-auto grid max-w-[1800px] grid-cols-1 gap-3 px-3 py-3 sm:px-5 lg:grid-cols-[minmax(230px,280px)_minmax(0,1fr)_minmax(300px,360px)] xl:grid-cols-[290px_minmax(0,1fr)_380px]">
         <aside className="order-2 min-h-0 lg:order-1 lg:sticky lg:top-[70px] lg:h-[calc(100vh-80px)]">
+          {activeTab === 'course' ? (
+            <CourseRoadmap
+              lessons={COURSE_LESSONS}
+              progress={courseProgress}
+              activeLessonId={courseView === 'lesson' ? activeCourseLessonId : null}
+              onOpenLesson={openCourseLesson}
+              onStartCourse={handleStartCourse}
+              onReset={handleResetCourse}
+            />
+          ) : null}
           {activeTab === 'play' ? (
             <PlaySidebar
               settings={settings}
@@ -734,6 +981,52 @@ export default function App() {
 
         <section className="order-1 min-w-0 lg:order-2">
           <div className="mx-auto flex w-full max-w-[760px] flex-col gap-3">
+            {isCourse ? (
+              courseView === 'home' ? (
+                <CourseWelcome
+                  lessons={COURSE_LESSONS}
+                  progress={courseProgress}
+                  previewStep={COURSE_PREVIEW_STEP}
+                  theme={theme}
+                  orientation={visibleOrientation}
+                  settings={settings}
+                  onStartCourse={handleStartCourse}
+                  onOpenFreePlay={handleOpenFreePlay}
+                />
+              ) : activeCourseLesson && activeCourseStep ? (
+                <CourseLessonBoardPanel
+                  lesson={activeCourseLesson}
+                  step={activeCourseStep}
+                  stepIndex={activeCourseStepIndex}
+                  stepComplete={activeCourseStepComplete}
+                  theme={theme}
+                  orientation={visibleOrientation}
+                  settings={settings}
+                  wrongMessage={courseWrongMessage}
+                  hintVisible={courseHintVisible}
+                  onWrong={setCourseWrongMessage}
+                  onCorrect={clearCourseFeedback}
+                  onToggleHint={toggleCourseHint}
+                  onStepComplete={handleCourseStepComplete}
+                  onNext={handleCourseNext}
+                  onPrevious={handleCoursePrevious}
+                  onFinish={handleFinishCourseLesson}
+                  onExit={handleOpenCourseHome}
+                />
+              ) : (
+                <CourseWelcome
+                  lessons={COURSE_LESSONS}
+                  progress={courseProgress}
+                  previewStep={COURSE_PREVIEW_STEP}
+                  theme={theme}
+                  orientation={visibleOrientation}
+                  settings={settings}
+                  onStartCourse={handleStartCourse}
+                  onOpenFreePlay={handleOpenFreePlay}
+                />
+              )
+            ) : (
+              <>
             <BoardHeader
               title={
                 isLesson
@@ -829,10 +1122,53 @@ export default function App() {
                 chess.js rules · Stockfish WASM · {openingBookSize()} mapped book positions
               </span>
             </div>
+              </>
+            )}
           </div>
         </section>
 
         <aside className="order-3 min-h-0 lg:sticky lg:top-[70px] lg:h-[calc(100vh-80px)]">
+          {activeTab === 'course' ? (
+            <div className="scrollbar-thin flex h-full min-h-0 flex-col gap-3 overflow-y-auto pr-0.5">
+              {courseView === 'home' ? (
+                <CourseOverviewPanel
+                  lessons={COURSE_LESSONS}
+                  progress={courseProgress}
+                  onStartCourse={handleStartCourse}
+                  onOpenFreePlay={handleOpenFreePlay}
+                />
+              ) : activeCourseLesson && activeCourseStep ? (
+                <CourseInstructionPanel
+                  lesson={activeCourseLesson}
+                  step={activeCourseStep}
+                  stepIndex={activeCourseStepIndex}
+                  stepComplete={activeCourseStepComplete}
+                  progress={courseProgress}
+                  wrongMessage={courseWrongMessage}
+                  hintVisible={courseHintVisible}
+                  onToggleHint={toggleCourseHint}
+                  onExit={handleOpenCourseHome}
+                  onFreePractice={handleCourseFreePractice}
+                />
+              ) : (
+                <CourseOverviewPanel
+                  lessons={COURSE_LESSONS}
+                  progress={courseProgress}
+                  onStartCourse={handleStartCourse}
+                  onOpenFreePlay={handleOpenFreePlay}
+                />
+              )}
+              <CoachChat
+                messages={chat.messages}
+                isTyping={chat.isTyping}
+                context={coachContext}
+                agentStyle={settings.agentStyle}
+                onSend={handleChatSend}
+                onClear={chat.clear}
+                className="min-h-[300px] flex-1"
+              />
+            </div>
+          ) : null}
           {activeTab === 'play' ? (
             <div className="scrollbar-thin flex h-full min-h-0 flex-col gap-3 overflow-y-auto pr-0.5">
               <AnalysisPanel

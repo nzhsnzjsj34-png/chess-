@@ -227,6 +227,10 @@ export function ChessBoard({
       return;
     }
     const piece = pieceBySquare.get(square);
+    if (selected && square !== selected && (!piece || piece.color !== interactiveColor)) {
+      onBlockedMove?.(selected, square);
+      return;
+    }
     if (piece?.color === interactiveColor && (getLegalMoves?.(square) ?? []).length > 0) {
       setSelected(square === selected ? null : square);
     } else {

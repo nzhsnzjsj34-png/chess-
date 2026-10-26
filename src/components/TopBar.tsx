@@ -4,6 +4,7 @@ import {
   CircleCheck,
   Cpu,
   Crown,
+  GraduationCap,
   LoaderCircle,
   RotateCcw,
   Settings2,
@@ -16,6 +17,7 @@ import type { EngineStatusSnapshot, TabId } from '../types';
 import { Button, cx, IconButton } from './ui';
 
 const TABS = [
+  { id: 'course', label: 'Course', icon: GraduationCap, hint: 'Structured London System course' },
   { id: 'play', label: 'Play', icon: Swords, hint: 'Spar against Stockfish' },
   { id: 'learn', label: 'Learn', icon: BookOpen, hint: 'Guided London chapters' },
   { id: 'review', label: 'Review', icon: Activity, hint: 'Analyze and import games' },
@@ -62,7 +64,7 @@ export function TopBar({
           </div>
         </div>
 
-        <nav className="scrollbar-thin order-3 flex w-full min-w-0 items-center gap-1 overflow-x-auto rounded-xl border border-white/7 bg-black/20 p-1 lg:order-none lg:mx-auto lg:w-auto lg:max-w-[520px]">
+        <nav className="scrollbar-thin order-3 flex w-full min-w-0 items-center gap-1 overflow-x-auto rounded-xl border border-white/7 bg-black/20 p-1 lg:order-none lg:mx-auto lg:w-auto lg:max-w-[640px]">
           {TABS.map((tab) => {
             const Icon = tab.icon;
             const active = activeTab === tab.id;
@@ -73,7 +75,7 @@ export function TopBar({
                 title={tab.hint}
                 onClick={() => onTabChange(tab.id)}
                 className={cx(
-                  'flex min-w-[88px] flex-1 items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-bold transition lg:flex-none',
+                  'flex min-w-[80px] flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-bold transition lg:flex-none',
                   active
                     ? 'bg-amber-300/14 text-amber-100 shadow-[inset_0_0_0_1px_rgba(233,185,73,0.25)]'
                     : 'text-slate-400 hover:bg-white/5 hover:text-slate-100',

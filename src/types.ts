@@ -2,7 +2,7 @@ import type { Color, Piece, PieceSymbol, Square } from 'chess.js';
 
 export type { Color, Piece, PieceSymbol, Square } from 'chess.js';
 
-export type TabId = 'play' | 'learn' | 'review' | 'settings';
+export type TabId = 'course' | 'play' | 'learn' | 'review' | 'settings';
 export type BoardThemeId = 'midnight' | 'walnut' | 'emerald' | 'arctic';
 export type DifficultyId = 'beginner' | 'casual' | 'club' | 'expert' | 'grandmaster';
 export type OpeningMode = 'off' | 'guided' | 'strict' | 'bot';

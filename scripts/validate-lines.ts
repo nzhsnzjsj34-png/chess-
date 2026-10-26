@@ -3,6 +3,7 @@
  * Run with: npm run test:lines
  */
 import { Chess } from 'chess.js';
+import { COURSE_LESSONS, TOTAL_COURSE_DRILLS, TOTAL_COURSE_STEPS } from '../src/data/course';
 import { LESSON_CHAPTERS } from '../src/data/lessons';
 import { DEVIATION_DRILLS, EXTRA_BOOK_LINES, openingBookSize } from '../src/data/openingBook';
 
@@ -48,11 +49,43 @@ for (const line of [...EXTRA_BOOK_LINES, ...DEVIATION_DRILLS]) {
   });
 }
 
+for (const courseLesson of COURSE_LESSONS) {
+  for (const step of courseLesson.steps) {
+    const board = new Chess(step.beforeFen);
+    if (!step.expectedUci) {
+      if (step.beforeFen !== step.afterFen) {
+        failures += 1;
+        console.error(`❌ ${courseLesson.id}/${step.id}: concept FENs do not match`);
+      }
+      continue;
+    }
+    try {
+      const move = board.move(step.expectedUci);
+      if (board.fen() !== step.afterFen) {
+        failures += 1;
+        console.error(`❌ ${courseLesson.id}/${step.id}: after FEN does not match replay`);
+      }
+      if (move.san !== step.san) {
+        failures += 1;
+        console.error(
+          `❌ ${courseLesson.id}/${step.id}: SAN mismatch (${move.san} vs ${step.san})`,
+        );
+      }
+    } catch (error) {
+      failures += 1;
+      console.error(
+        `❌ ${courseLesson.id}/${step.id}: illegal expected move ${step.expectedUci}`,
+        error,
+      );
+    }
+  }
+}
+
 if (failures > 0) {
   console.error(`\n${failures} line validation failure(s).`);
   process.exit(1);
 }
 
 console.log(
-  `\n✅ Validated ${LESSON_CHAPTERS.length} lessons, ${EXTRA_BOOK_LINES.length} extra book branches, ${DEVIATION_DRILLS.length} drills, and ${openingBookSize()} opening positions.`,
+  `\n✅ Validated ${LESSON_CHAPTERS.length} lessons, ${EXTRA_BOOK_LINES.length} extra book branches, ${DEVIATION_DRILLS.length} drills, ${COURSE_LESSONS.length} course lessons (${TOTAL_COURSE_STEPS} steps / ${TOTAL_COURSE_DRILLS} play-the-move drills), and ${openingBookSize()} opening positions.`,
 );

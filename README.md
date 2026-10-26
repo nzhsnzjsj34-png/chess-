@@ -49,7 +49,7 @@ npm install
 npm run dev
 ```
 
-Open the live preview / `http://localhost:5173`. The dev server binds to `0.0.0.0` and permits proxied preview hosts.
+Open the live preview / `http://localhost:5173`. The app opens directly on the **Course** home view with a prominent **Start Lesson 1** / **Continue Course** CTA. The dev server binds to `0.0.0.0` and permits proxied preview hosts.
 
 ```bash
 npm run typecheck       # strict TypeScript
@@ -63,6 +63,26 @@ No backend or API key is required.
 ---
 
 ## 3. Feature map
+
+### Structured course (default home view)
+
+The app now opens on a **Course** workspace instead of an open-ended dashboard. It provides:
+
+- A prominent **Start Lesson 1** / **Continue Course** CTA on first open
+- Four sequential lessons with a visible linear roadmap:
+  1. Core Setup & Pawn Structure
+  2. Development & Minor Pieces
+  3. Handling Black's Common Responses
+  4. Tactical Patterns & Attacks
+- `Not Started`, `In Progress`, `Completed`, and `Locked` status badges
+- Overall and per-lesson completion bars saved in `localStorage`
+- Step-by-step instruction panels explaining the move, the underlying strategy, and White’s next plan
+- **Previous Step / Next Step** navigation
+- Forced **play-the-move drills**: the board highlights the source/target, and Next Step stays disabled until the correct move is played
+- Instant wrong-move feedback that keeps the board unchanged and asks the learner to retry
+- A revealable move hint, animated correct move, verified-step state, and lesson completion unlocking the next stage
+
+The open-ended Play / Learn / Review / Settings workspaces remain available from the top navigation.
 
 ### Interactive board
 
@@ -151,6 +171,7 @@ src/
 
   data/
     settings.ts                     # defaults, presets, themes, bounds, sanitizer
+    course.ts                       # four-lesson roadmap, 30 steps, 22 forced drills
     lessons.ts                      # eight London chapters and visual steps
     openingBook.ts                  # position-keyed book, setup markers, drills
 
@@ -160,6 +181,7 @@ src/
 
   hooks/
     useSettings.ts                  # persisted customization state
+    useCourseProgress.ts            # persisted lesson/step status and CTA target
     useLondonGame.ts                # authoritative game state machine
     useLessonPlayer.ts              # chapter/step/autoplay controller
     useCoachChat.ts                 # chat history and async replies
@@ -175,7 +197,12 @@ src/
 
   components/
     ui.tsx                          # design-system primitives
-    TopBar.tsx                      # navigation and global controls
+    TopBar.tsx                      # Course / Play / Learn / Review / Settings navigation
+    CourseRoadmap.tsx               # linear lesson path and progress badges
+    CourseWelcome.tsx               # landing hero, CTA, progress ring, board preview
+    CourseOverviewPanel.tsx         # course rules and next objective
+    CourseLessonBoardPanel.tsx      # forced play-the-move drill board and navigation
+    CourseInstructionPanel.tsx      # why/plan/hint/feedback instruction panel
     ChessBoard.tsx                  # interactive board, arrows, drag, promotion
     EvalBar.tsx                     # White-perspective evaluation bar
     MoveList.tsx                    # SAN/LAN move table and quality badges
@@ -254,9 +281,9 @@ Accepted response shapes include `{ "reply": "..." }`, `{ "message": "..." }`, `
 
 ## 7. Validation
 
-- `npm run test:lines` replays all lesson lines, extra book branches, and deviation drills through `chess.js`.
+- `npm run test:lines` replays all lesson lines, extra book branches, deviation drills, and all 4 course lessons / 30 steps / 22 forced drills through `chess.js`.
 - `npm run build` runs strict TypeScript and Vite production bundling.
-- A DOM smoke test was also used to confirm initial render, board creation, a legal click-to-move, coach response, tab navigation, and lesson loading.
+- DOM smoke tests confirm the course landing CTA, roadmap statuses, lesson navigation, a locked Next Step, wrong-move feedback without board mutation, correct-move animation/unlock, persisted progress, Continue Course state, coach response, tab navigation, and lesson loading.
 - The bundled Stockfish engine was verified over UCI with `uci`, `setoption`, `isready`, `position fen`, and `go depth ... movetime ...`.
 
 ---
